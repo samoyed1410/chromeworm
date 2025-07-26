@@ -296,6 +296,7 @@ func (p *Phishlet) Clear() {
 	p.forcePost = []ForcePost{}
 	p.customParams = make(map[string]string)
 	p.isTemplate = false
+	p.rewriteUrls = []RewriteUrl{}
 }
 
 func (p *Phishlet) LoadFromFile(site string, path string, customParams *map[string]string) error {
