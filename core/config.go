@@ -57,6 +57,8 @@ type BlacklistConfig struct {
 }
 
 type CertificatesConfig struct {
+	CertPath string `mapstructure:"cert_path" json:"cert_path" yaml:"cert_path"`
+	KeyPath  string `mapstructure:"key_path" json:"key_path" yaml:"key_path"`
 }
 
 type GoPhishConfig struct {
